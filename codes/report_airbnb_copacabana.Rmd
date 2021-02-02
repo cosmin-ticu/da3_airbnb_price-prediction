@@ -1,0 +1,386 @@
+---
+title: "DA3 Assignment 1 - Airbnb Rio Analysis"
+author: "Cosmin Catalin Ticu"
+date: "02/02/2021"
+output:
+  prettydoc::html_pretty:
+    theme: architect
+    highlight: github
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Clear memory
+rm(list=ls())
+# Descriptive statistics and regressions
+library(tidyverse)
+library(caret)
+library(skimr)
+library(grid)
+library(glmnet)
+library(stargazer)
+library(xtable)
+library(directlabels)
+library(knitr)
+library(cowplot)
+library(rattle)
+library(ranger)
+library(Hmisc)
+library(kableExtra)
+
+# set data dir, load theme and functions
+source("F:/OneDrive - Central European University/Courses/Winter_Term/DA3/da3_airbnb_price-prediction/codes/gabor_textbook/theme_bg.R")
+source("F:/OneDrive - Central European University/Courses/Winter_Term/DA3/da3_airbnb_price-prediction/codes/gabor_textbook/da_helper_functions.R")
+
+#location folders
+# Used area
+area <- "copacabana"
+data <-
+  read_csv("F:/OneDrive - Central European University/Courses/Winter_Term/DA3/da3_airbnb_price-prediction/data/clean/airbnb_copacabana_workfile_adj.csv") %>%
+  mutate_if(is.character, factor)
+
+options(digits = 3)
+```
+
+# Executive Summary
+
+The aim of this study is to help a company operating small and mid-sized apartments to price their properties outside of the real estate market. The task at hand comprises extracting Airbnb data for the city of choice, as Airbnbs tend to follow their own pricing market, and using the extracted data to estimate the price of a property according to facilities, environment and a host of other characteristics. As such, this data prediction tasks implies building and contrasting between Airbnb price predicting models in the city of Rio de Janeiro, Brazil, in order to find the best combination of parameters and algorithms. The results of this study showcase algorithmic complexity, black-box models' superior performance and the accuracy effects of highly complicated predictions. While an OLS regression is most often enough to investigate the patterns of association between a few variables with regards to their coefficients, this study's usage of the random forest modeling choice found that in order to achieve more confident overall prediction results, black-box models should be used. The final model of choice comprises many factors such as individual amenities (very granular level), host reliability characteristics and property facilities, proving that that simplest models might not always be the best choice.
+
+# Introduction - Purpose & Rationale
+
+With a diverse portfolio of property choices throughout the world, Airbnb represents the largest short-term rental agency. The company supporting this study is interested in learning how to price their small and mid-sized apartments on an alternative market to the real estate one. For the purpose of this study, this task is understood to refer to short-term rental, which can be incrementally more profitable than a direct sale of real estate properties.
+
+The city of choice for this analysis is Rio de Janeiro in Brazil, a hub in South America and notorious for a large socio-economic gap for its residents. This makes the city a perfect contender for a price predicting model for small and mid-sized apartments. The performance, accuracy and efficiency of the predictive models will be put under strain trying to handle the large differences in prices, facilities and amenities. With a potential monopoly from certain Airbnb hosts, it is worthwhile to explore factors that pertain to the hosts, as Airbnb has many verification and rating mechanisms in place for the owners of the listings. As such, considering the large pool of factors that go into the price estimation of a short-term rental, this study will attempt to include as many characteristics, both Airbnb specific (through review counts and host characteristics) and general (number of accommodates, bathrooms, etc.).
+
+The analysis undertaken by this study is similar in nature to the Airbnb case study conducted by Bekes & Kezdi in their ["Data Analysis for Business, Economics and Policy"](https://gabors-data-analysis.com/) book (follow chapters 14 & 16 for reference). Part of the aim of this report is to contrast the findings and modeling choices of Bekes & Kezdi for their London Airbnb dataset. As such, a similar research question to the guiding textbook arises: How can we predict the Airbnb daily price of a small or mid-sized apartment for the city of Rio de Janeiro? Accordingly, what are the important features that go into predicting the daily price of such an accommodation? Furthermore, how do different predictive models perform and uncover the patterns of association?
+
+This study can be classified as a prediction exercise with cross-sectional data. Our purpose is to predict prices for many different apartments throughout the city of Rio. Nonetheless, the sheer complexity of the dataset (which will be discussed in detail later) implies that a subsample within Rio de Janeiro might be the better choice. For the purpose of testing external validity (at a later stage) and for narrowing down the already-complex nature of this study, the data and guiding questions will be entirely restricted to the most popular neighborhood of Rio, Copacabana. Naturally, for external validity's sake, we have to rely on the assumptions that prices do not fluctuate drastically for other neighborhoods and that they stay largely consistent throughout the year. This matter will be touched up within the closing arguments of this paper.
+
+The structure of this report takes a standard data science approach. First, an introduction into the dataset, variables, functional forms and summary statistics will be provided. These details will allow us to make concious decisions about what to include in the analysis and how to predict the price. Following this data cleaning, exploration and fine-tuning, a regression model building section will cover all the predictive modeling choices undertaken within the study. The regression models of various complexity will be compared and the most performing one will be used to compute a few diagnostic statistics for our price prediction. Upon this dignostication, a section on LASSO regression will outline the main difference between the regression model of choice, created with arbitrarily (based on some degree of domain knowledge) chosen variables, and the algorithmically chosen variables of the LASSO model. Lastly, the same process as for the regression models will be adopted for a random forest predictive model. This model will be evaluated through diagnostics and its black-box prediction will be discussed. To answer the latter part of the research question, a variable importance analysis will be conducted as the final step of this study.
+
+# Data & Variables
+
+The data for this case study stems from "[Inside Airbnb](http://insideairbnb.com/)", a website providing fairly cleaned webscrapped data on listings throughout all the major cities of the world. The dataset of choice represents a cross-section of Rio de Jainero listings scrapped from the web on the 23rd of December, 2020 (accessible [here](http://data.insideairbnb.com/brazil/rj/rio-de-janeiro/2020-12-23/data/listings.csv.gz). The target variable is price per night, expressed in the local currency of Brazilian reals. Before discussing other variables, it is worthwhile to inspect the distribution of the price, once a few extreme values (above 6000 Brazilian reals, or 1000 EUR) have been cleaned. This cleaning was done in order to exclude some of the extremely luxurious listings as well as some of the potential typos in price (over 10000 EUR/night for an apartment accommodating 6 people seems a little extreme, right?).
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# Distribution of price by type
+
+# Histograms
+# price
+price_density <- ggplot(data=data, aes(x=price)) +
+  geom_histogram_da(type="percent", binwidth = 50) +
+  #geom_histogram(aes(y = (..count..)/sum(..count..)), binwidth = 10, boundary=0,
+  #               color = color.outline, fill = color[1], size = 0.25, alpha = 0.8,  show.legend=F,  na.rm=TRUE) +
+#  coord_cartesian(xlim = c(0, 400)) +
+  labs(x = "Price (Brazilian reals)",y = "Percent")+
+  scale_y_continuous(expand = c(0.00,0.00),limits=c(0, 0.15), breaks = seq(0, 0.15, by = 0.03), labels = scales::percent_format(1)) +
+    scale_x_continuous(expand = c(0.00,0.00),limits=c(0,6000), breaks = seq(0,6000, 500)) +
+  theme_bg()+
+  ggtitle('Distribution of apartment prices in Copacabana (level scale)')
+price_density
+
+# lnprice
+ln_price_density<- ggplot(data=data, aes(x=ln_price)) +
+  geom_histogram_da(type="percent", binwidth = 0.2) +
+  #  geom_histogram(aes(y = (..count..)/sum(..count..)), binwidth = 0.18,
+  #               color = color.outline, fill = color[1], size = 0.25, alpha = 0.8,  show.legend=F,  na.rm=TRUE) +
+  coord_cartesian(xlim = c(3.5, 8.7)) +
+  scale_y_continuous(expand = c(0.00,0.00),limits=c(0, 0.15), breaks = seq(0, 0.15, by = 0.05), labels = scales::percent_format(5L)) +
+  scale_x_continuous(expand = c(0.00,0.01),breaks = seq(3.3,8.9, 0.6)) +
+  labs(x = "ln(price, Brazilian reals)",y = "Percent")+
+  theme_bg()+
+  ggtitle('Distribution of apartment prices in Copacabana (log scale)')
+ln_price_density
+```
+
+Price data will almost always be skewed with a long right tail, even after removing all of the truly extreme values. For this reason, the logarithmic transformation of price was done. With a normal distribution, the natural log of the price would be the modeling choice here. However, for the scope of easy interpretation and with respect to the predictive scope of the study (not causal), we can proceed using the price variable as level.
+
+With regards to the other variables, the number of people accommodated was restricted to between 2 and 6 in order to match the client's criteria for small to mid-sized apartments. This choice removes any extreme values from our dataset, such as extremely large apartments or houses, or listings that classify as an apartment yet can only accommodate 1 person. This modeling choice restricts our sample to a normal (90% of the time) search on Airbnb. The property types were restricted to 4 main categories, as per Airbnb's classification: 'Entire Apartment', 'Entire Condominium', 'Private room in apartment' and 'Private room in condominium'. The private rooms were also chosen as oftentimes there is no difference in amenities, facilities and even price between listings self-described as entire apartments and ones that are self-described as private rooms, even though they both have kitchens and bathrooms. The inclusion of private rooms makes our analysis more general.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+## Boxplot of price by room type
+price_vs_room_box <- ggplot(data = data, aes(x = room_type, y = price)) +
+  stat_boxplot(aes(group = room_type), geom = "errorbar", width = 0.3,
+               color = c(color[2],color[1]), size = 0.5, na.rm=T)+
+  geom_boxplot(aes(group = room_type),
+               color = c(color[2],color[1]), fill = c(color[2],color[1]),
+               size = 0.5, width = 0.6, alpha = 0.3, na.rm=T, outlier.shape = NA) +
+  scale_y_continuous(expand = c(0.01,0.01),limits = c(0,1500), breaks = seq(0,1500,300)) +
+  labs(x = "Room type",y = "Price (Brazilian reals)")+
+  theme_bg()+
+  ggtitle('Distribution of prices in Copacabana by room type')
+price_vs_room_box
+
+# Boxplot
+g5 <- ggplot(data, aes(x = factor(accommodates), y = price,
+                        fill = factor(property_type), color=factor(property_type))) +
+  geom_boxplot(alpha=0.8, na.rm=T, outlier.shape = NA, width = 0.8) +
+    stat_boxplot(geom = "errorbar", width = 0.8, size = 0.3, na.rm=T)+
+    scale_color_manual(name="",
+                     values=c(color[2],color[1],color[3],color[4])) +
+  scale_fill_manual(name="",
+                     values=c(color[2],color[1],color[3],color[4])) +
+  labs(x = "Accomodates (Persons)",y = "Price (Brazilian reals)")+
+  scale_y_continuous(expand = c(0.01,0.01), limits=c(0, 2500), breaks = seq(0,2500, 500))+
+  theme_bg() +
+  theme(legend.position = c(0.1,0.8)       )+
+  ggtitle('Distribution of apartment prices in Copacabana by property type and number of accommodated people')
+g5
+```
+
+The rest of the variables chosen span host characteristics (superhost designation, acceptance rate, response rate, listings count, profile pic and identity verification), general room characteristics (bathrooms, bedrooms, beds), characteristics of the stay (minimum nights required to book), Airbnb review matters (number of reviews and review scores overall rating), and lastly, amenities (spanning an extremely long of list specific amenities ranging from: pool, parking garage, BBQ until shampoo, towels and TV).
+
+## Data Cleaning, Selection & Functional Forms
+
+The data was first cleaned by adopting 4 different methods of handling missing values, each according to the importance of the designated variables. First of all, all the instances where the price was missing were dropped from the dataset. This was done because we could not conceptually impute data for our target variable. Before any other cleaning and functional form creation, which we all non-mandatory steps (as the regression models could have been built without these techniques), our dataset spanned 5632 observations, each representing a single listing. The second round of handling missing values centered around imputing values for the columns that did not contain too many missing observations (usually less than 10% of the overall data). In this case, when missing, the number of bathrooms was replaced with the median values, the number of beds was replaced according to the assumption that 1 bed usually corresponds to about 1.5 guests (this translates better as 2 beds per every 3 guests - a logical assumption & fitting domain knowledge) and the number of bedrooms was replaced accordiing to the assumption that 1 bedroom usually corresponds to 2 guests. All of the individual score component variables were removed from the dataset as they contained too many missing variables. This leads us to the last technique for handling missing values, which is to impute a value even when the proportion of missing data is large, but to also add a flag variable for every observation that was artifically imputed. The variables impacted by this technique are review scores rating, host acceptance rate and the host response rate. These variable were deemed to important to conduct the analysis without (and we will later see that they bring up the predictive models' performance).
+
+For the variable transformation and functional form choices, the categorical variables (property type & room type) were transformed into factor dummies and the rest of the numeric variables went through a distribution check-up.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+################################################
+# look at some cnts. key vars, functional form #
+################################################
+
+## accomodates: look at distribution
+
+price_vs_accommodates <- ggplot(data = data, aes(x=accommodates, y=price)) +
+  geom_point(size=1, colour=color[3], shape=16)+
+  ylim(0,6000)+
+  xlim(0,8)+
+  labs(x="Number of people accomodated",y="Price")+
+  geom_smooth(method="lm", colour=color[1], se=FALSE)+
+  theme_bg()+
+  ggtitle('Distribution of apartment prices in Copacabana by number of accommodated people')
+price_vs_accommodates
+```
+
+The number of accommodates variable was left as is, without any transformation to logarithmic scale. This is a different modeling choice than presented by Bekes & Kezdi as their dataset contained a much wider accommodation spectrum, thus potentially skeweing the data. In our case, the above dispersion looks quite normal, naturally validating the assumption that apartments that can house more people tend to cost more. The beds variable was converted to a logarithmic scale, as the distribution of beds has a long right tail (perhaps due to the luxurious apartments that offer 6 or even more beds for a proportionately small number of accommodated people). The number of bathrooms was converted to a factor variable, corresponding to 3 different categories (0, 1 or 2+ bathrooms) in order to reduce the right skew in the bathroom variable.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+## Number of reviews
+nreview_plot <- data %>%
+  filter(number_of_reviews < 100)
+
+ggplot(nreview_plot, aes(number_of_reviews)) +
+  geom_histogram(binwidth = 5, fill = color[1], color = color.outline, alpha = 0.8, size = 0.25) +
+  ylab("") +
+  xlab("N of reviews") +
+  theme_bg()+
+  ggtitle('Distribution of number of reviews (cap at 100) for properties in Copacabana')
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, out.width='50%'}
+## review score effect
+ggplot(data = data, aes(x=review_scores_rating , y=price)) +
+  geom_point(size=1.5, colour=color[3], shape=4) +
+  ylim(0,800)+
+  xlim(20,100)+
+  geom_smooth(method="loess", colour=color[1], se=F)+
+  labs(x="Review score",y="Daily price (Brazilian reals)")+
+  theme_bg()+
+  ggtitle('LOESS fit & distribution of review score by price for properties in Copacabana')
+
+# plot logs of both to see if effect changes
+ggplot(data = data, aes(x=log(review_scores_rating) , y=ln_price)) +
+  geom_point(size=1.5, colour=color[3], shape=4) +
+  geom_smooth(method="loess", colour=color[1], se=F)+
+  labs(x="Log Review score",y="Log Daily price (Brazilian reals)")+
+  theme_bg()+
+  ggtitle('LOESS fit & distribution of log review score by log price for properties in Copacabana')
+```
+
+The number of reviews was ultimately converted into a factor variable as well, corresponding to 3 different categories (0, 1-51 or 51+ reviews), in order to minimized the noticeable effects of the right skew (as seen above). The review score variable was kept at a level scale, as its transformation to log did not impact the effect it had on the dependent price variable. Lastly, the minimum number of nights required for a stay and the host's count of listings were converted into factor variables as well. The minimum nights variable was categorized into 1, 2, 3-4 or 5+ nights for the required minimum and the listings count was split into 0, 1, 2-4, 5-9 or 10+ listings. Both of these transformations were made based on a few trials to see if a normal distribution could be achieved between all of the categories, making sure that we do not create extreme values artificially. 
+
+As for the cleaning of the amenities column, which was initially found as a list of strings for each listing, a function adapted from Fasih Atif (whose solution on his GitHub repository can be found [here](https://github.com/fasihatif/Data-Analysis-1-2-3/blob/master/Data_Analysis_3/functions/for_loop_aggregate_columns.R)) went through a pre-set list of amenities (spanning from free parking, pool, BBQ, elevator, shampoo, stove, laundry, etc.) in order to match typos, double occurrences and misspelled amenities. Before running this cleaning function, with each amenity found in all the lists of the 5000+ listings, we were left with roughly 800 different dummy variables, each representing a single amenity. With the cleaning function in place, the duplicated columns were combined and the ones that did not match the search criteria in the function (for example really specific downtown Rio amenities, such as residential parking garage) were only kept if they appeared in at least 5% of all the Copacabana listings. With this cleaning procedure in place, we are left with 60+ columns, each being a dummy variable for an individual popular amenity. A note on bias here would be that all the amenity categories were created by the researcher, potentially omitting traditionally Brazilian elements or extremely luxurious amenities that would definitely drive up the price in real life. This concludes the data cleaning, preparation and functional form selection, leaving us with a working dataset of 5584 observations (individual listings in Copacabana).
+
+# Data Modeling Choices
+
+For the upcoming predictive modeling methodologies (OLS, LASSO & Random Forest), all of the variables were categorized into larger groups in order to pick and mix for the training models and to compare out of sample performance according to model complexity as well (we actually find that the most complicated models containing over 100 variables perform quite well). The basic modeling is done only with the variable of number of accommodated people and gradually builds up in complexity (number of explanatory variables & interactions). The general model contains all the property characteristics (accommodates, beds in log, property type, room type and the factored bathroom variable). The review group of variables contains the flag review rating for imputed values, the review rating and the factored number of reviews. The host characteristics grouping contains all the host matters, from response rate until the factored listings count variable. Lastly, we also add the factored minimum nights variable as well as all the amenities columns. With all the groups in mind, it is worthwhile to first inspect interactions according to domain knowledge to see if there are any significant differences in price between a few pair of factor variables.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+#####################
+# Setting up models #
+#####################
+
+# Basic Variables
+basic_lev  <- c("accommodates", "ln_beds", "property_type", "room_type", "f_bathroom")
+
+# Factorized variables
+reviews <- c("f_number_of_reviews","review_scores_rating", "flag_review_scores_rating")
+host_characteristics <- c("host_response_rate","flag_host_response_rate","host_acceptance_rate","flag_host_acceptance_rate","host_is_superhost","host_has_profile_pic","host_identity_verified", "f_host_listings_count")
+nights_add <- "f_minimum_nights"
+
+amenities <- paste(colnames(data[21:87]), sep = ",")
+
+# create dummy vars
+dummies <- names(data)[seq(21,87)]
+data <- data %>%
+  mutate_at(vars(dummies), funs("d"= (.)))
+# rename columns
+dnames <- data %>%
+  select(ends_with("_d")) %>%
+  names()
+dnames_i <- match(dnames, colnames(data))
+colnames(data)[dnames_i] <- paste0("d_", tolower(gsub("[^[:alnum:]_]", "",dummies)))
+data <- data %>% select(-dummies)
+# Dummy variables: Extras -> collect all options and create dummies
+amenities <-  grep("^d_.*", names(data), value = TRUE)
+
+#################################################
+# Look for interactions
+################################################
+
+#Look up room type interactions
+p1 <- price_diff_by_variables2(data, "accommodates", "room_type", "No. of people it accommodates", "Room type") # no interaction needed
+p2 <- price_diff_by_variables2(data, "property_type", "room_type", "Property type", "Room type") # no interaction needed
+#Look up listings count interactions
+p3 <- price_diff_by_variables2(data, "f_host_listings_count", "host_is_superhost", "Host's property listings", "Host is Superhost") # interaction needed - superhost starts to count as of 10+ listings (count as in higher price)
+p4 <- price_diff_by_variables2(data, "f_host_listings_count", "host_identity_verified", "Host's property listings", "Host Identity Verified") # interaction needed - cannot ask a high price when no listings and not verif
+#Look up number of reviews interactions
+p5 <- price_diff_by_variables2(data, "f_number_of_reviews", "host_is_superhost", "Number of reviews", "Host is Superhost") # no interaction
+#Look up minimum nights interactions
+p6 <- price_diff_by_variables2(data, "f_minimum_nights", "room_type", "Minimum nights stay", "Room type") # no interaction
+#Look at property type interactions with diff amenities
+p7 <- price_diff_by_variables2(data, "property_type", "d_pool_agg", "Property type", "Listing has a pool") # interaction between pool and having an entire apartment (price goes up)
+p8 <- price_diff_by_variables2(data, "property_type", "d_patioorbalcony", "Property type", "Listing has patio or balcony") # no interaction
+
+g_interactions <- plot_grid(p1, p2, p3, p4, nrow = 2, ncol = 2)
+g_interactions
+
+g_interactions2 <- plot_grid(p5, p6, p7, p8, nrow = 2, ncol = 2)
+g_interactions2
+```
+
+According to the plots above the interaction between the host's count of listings and whether they are a superhost is present and can be seen when inspecting hosts with 10 or more listings. As such, being a superhost appears to matter differently with respect to pricing once a host has more than a handful of properties listed on Airbnb. This changing pattern from the hosts with few listings (where on average the superhosts appear to charge less) warrants the inclusion of an interaction term. Furthermore, the interaction between a host's count of listings and whether their identity is verified according to price is also noticeable. This might imply that hosts who do not have any listings and who are also not verified tend to offer lower prices for their property. This appears different than the case of hosts who have 1 property listed, thus warranting the inclusion of an interaction term. The interaction between the pool dummy (having a pool as an amenity at the Airbnb) appears to matter quite a lot for apartments, unlike for other types of listings. This also warrants the addition of an interaction term. Lastly, a series of interaction terms was also added between the room type and number of people accommodated variables and all of the 60+ amenities. This last interaction term will be used for the most advanced model, which will serve as a good basis for the reverse-engineering techniques of the LASSO regression.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# dummies suggested by graphs
+X1  <- c("f_host_listings_count*host_is_superhost",  "f_host_listings_count*host_identity_verified")
+X2  <- "f_host_listings_count*d_pool_agg"
+
+# Additional interactions of factors and dummies
+X3  <- c(paste0("(room_type + accommodates) * (",
+                paste(amenities, collapse=" + "),")"))
+
+# Create models in levels models: 1-8
+modellev1 <- " ~ accommodates"
+modellev2 <- paste0(" ~ ",paste(basic_lev, collapse = " + "))
+modellev3 <- paste0(" ~ ",paste(c(basic_lev, reviews),collapse = " + "))
+modellev4 <- paste0(" ~ ",paste(c(basic_lev, host_characteristics, X1),collapse = " + "))
+modellev5 <- paste0(" ~ ",paste(c(basic_lev, amenities, X3),collapse = " + "))
+modellev6 <- paste0(" ~ ",paste(c(basic_lev, reviews, nights_add), collapse = " + "))
+modellev7 <- paste0(" ~ ",paste(c(basic_lev, reviews, nights_add, host_characteristics, X1),collapse = " + "))
+modellev8 <- paste0(" ~ ",paste(c(basic_lev, reviews, host_characteristics, nights_add, X1, X2, amenities, X3),collapse = " + "))
+
+```
+
+## Validation & Holdout
+
+In order to increase the performance of our models and to assess their out of sample final accuracy, this study separates the 5500+ observations into a 20% holdout set and an 80% working set on which the OLS model training can occur. The OLS models are each trained through 5-fold cross-validation so as to find the least overfitting coefficients, taking the average of each model's 5 test folds, warranting the RMSE and BIC statistics with no assumptions. To compare all the models, both the RMSE and BIC are used.
+
+# OLS Predictive Models - Serving as Basis
+
+With the interaction terms also computed, the models of choice under the first predictive methodology (OLS) span different types of complexity (from 1 single explanatory variable to the 8th predictive model containing all of the variables and interactions above).
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+#################################
+# Separate hold-out set #
+#################################
+
+# create a holdout set (20% of observations)
+smp_size <- floor(0.2 * nrow(data))
+
+# Set the random number generator: It will make results reproducable
+set.seed(20180123)
+
+# create ids:
+# 1) seq_len: generate regular sequences
+# 2) sample: select random rows from a table
+holdout_ids <- sample(seq_len(nrow(data)), size = smp_size)
+data$holdout <- 0
+data$holdout[holdout_ids] <- 1
+
+#Hold-out set Set
+data_holdout <- data %>% filter(holdout == 1)
+
+#Working data set
+data_work <- data %>% filter(holdout == 0)
+
+
+##############################
+#   cross validation OLS    #
+##############################
+
+## N = 5
+n_folds=5
+# Create the folds
+set.seed(20180124)
+
+folds_i <- sample(rep(1:n_folds, length.out = nrow(data_work) ))
+# Create results
+model_results_cv <- list()
+
+
+for (i in (1:8)){
+  model_name <-  paste0("modellev",i)
+  model_pretty_name <- paste0("(",i,")")
+
+  yvar <- "price"
+  xvars <- eval(parse(text = model_name))
+  formula <- formula(paste0(yvar,xvars))
+
+  # Initialize values
+  rmse_train <- c()
+  rmse_test <- c()
+
+  model_work_data <- lm(formula,data = data_work)
+  BIC <- BIC(model_work_data)
+  nvars <- model_work_data$rank -1
+  r2 <- summary(model_work_data)$r.squared
+
+  # Do the k-fold estimation
+  for (k in 1:n_folds) {
+    test_i <- which(folds_i == k)
+    # Train sample: all except test_i
+    data_train <- data_work[-test_i, ]
+    # Test sample
+    data_test <- data_work[test_i, ]
+    # Estimation and prediction
+    model <- lm(formula,data = data_train)
+    prediction_train <- predict(model, newdata = data_train)
+    prediction_test <- predict(model, newdata = data_test)
+
+    # Criteria evaluation
+    rmse_train[k] <- mse_lev(prediction_train, data_train[,yvar] %>% pull)**(1/2)
+    rmse_test[k] <- mse_lev(prediction_test, data_test[,yvar] %>% pull)**(1/2)
+
+  }
+
+  model_results_cv[[model_name]] <- list(yvar=yvar,xvars=xvars,formula=formula,model_work_data=model_work_data,
+                                         rmse_train = rmse_train,rmse_test = rmse_test,BIC = BIC,
+                                         model_name = model_pretty_name, nvars = nvars, r2 = r2)
+}
+
+model <- lm(formula,data = data_train)
+prediction_train <- predict(model, newdata = data_train)
+prediction_test <- predict(model, newdata = data_test)
+
+t1 <- imap(model_results_cv,  ~{
+  as.data.frame(.x[c("rmse_test", "rmse_train")]) %>%
+    dplyr::summarise_all(.funs = mean) %>%
+    mutate("model_name" = .y , "model_pretty_name" = .x[["model_name"]] ,
+           "nvars" = .x[["nvars"]], "r2" = .x[["r2"]], "BIC" = .x[["BIC"]])
+}) %>%
+  bind_rows()
+t1
+column_names <- c("Model", "N predictors", "R-squared", "BIC", "Training RMSE",
+                 "Test RMSE")
+
+knitr::kable(t1, caption = "Regression Models Comparison (BIC & R2 on all data; RMSE split according to training & test)")
+```
+
+
+
+
+
+# External Validity & Further Research
