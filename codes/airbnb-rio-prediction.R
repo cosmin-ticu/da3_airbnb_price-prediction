@@ -312,6 +312,7 @@ column_names <- c("Model", "N predictors", "R-squared", "BIC", "Training RMSE",
 
 knitr::kable(t1)
 
+# -R2, BIC on full work data-n.
 # -In sample rmse: average on training data; avg test : average on test data
 t14_2 <- t1 %>%
     select("model_pretty_name", "nvars", "r2" , "BIC", "rmse_train", "rmse_test")
@@ -593,31 +594,18 @@ level_vs_pred_all <- ggplot(data = d) +
 level_vs_pred_all
 save_fig("predicted_versus_actual_price_noLimit", output, "small")
 
-# Plot mean predicted price according to number of accommodates; visualizing 95% CI
-
-CI_95_accommodates <- ggplot(predictionlev_holdout_summary, aes(x=factor(accommodates))) +
-  geom_bar(aes(y = fit ), stat="identity",  fill = color[1], alpha=0.7 ) +
-  #geom_errorbar(aes(ymin=pred_lwr, ymax=pred_upr, color = "Pred. interval"),width=.2) +
-  geom_errorbar(aes(ymin=conf_lwr, ymax=conf_upr, color = "Conf. interval"),width=.2) +
-  scale_y_continuous(name = "Predicted price (Brazilian reals)") +
-  scale_x_discrete(name = "Accomodates (Persons)") +
-  scale_color_manual(values=c(color[2], color[2])) +
-  theme_bg() +
-  theme(legend.title= element_blank(),legend.position="none")
-CI_95_accommodates
-save_fig("95_ConfInterval_accommodates", output, "small")
-
 # Redo predicted values at 80% PI
 predictionlev_holdout_pred <- as.data.frame(predict(model7_level, newdata = data_holdout, interval="predict", level=0.8)) %>%
   rename(pred_lwr = lwr, pred_upr = upr)
 predictionlev_holdout_conf <- as.data.frame(predict(model7_level, newdata = data_holdout, interval="confidence", level=0.8)) %>%
   rename(conf_lwr = lwr, conf_upr = upr)
 
-predictionlev_holdout <- cbind(data_holdout[,c("price","n_accommodates")],
+predictionlev_holdout <- cbind(data_holdout[,c("price","accommodates")],
                                predictionlev_holdout_pred,
                                predictionlev_holdout_conf[,c("conf_lwr","conf_upr")])
 
 summary(predictionlev_holdout_pred)
+summary(predictionlev_holdout_conf)
 
 predictionlev_holdout_summary <-
   predictionlev_holdout %>%
